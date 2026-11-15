@@ -30,6 +30,7 @@ export interface MatchViewBridge {
     mountEmbedded(matchId: string, url: string, rect: Rect): Promise<void>;
     resize(matchId: string, rect: Rect): Promise<void>;
     unmount(matchId: string): Promise<void>;
+    unmountAll(): Promise<void>;
     launchExternal(matchId: string, browser: string, rect: Rect): Promise<void>;
   };
   events: {

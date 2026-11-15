@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useCallback } from "react";
 import { useAppStore } from "../store/useAppStore";
 import { computeOverlayLayout } from "../layout/LayoutEngine";
 import type { LayoutKind } from "@shared/types";
@@ -24,7 +24,10 @@ export function LiveViewing(): React.ReactElement {
   const setScreen = useAppStore((s) => s.setScreen);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  // Track which match IDs are currently mounted so we can diff on layout changes
+  const mountedRef = useRef<Set<string>>(new Set());
 
+  // --- Layout measurement ---
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -37,6 +40,74 @@ export function LiveViewing(): React.ReactElement {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layoutKind, matches.length]);
 
+  // --- Mount / resize BrowserViews whenever the computed layout changes ---
+  const mountStreams = useCallback(async (layout: typeof computedLayout) => {
+    if (!layout || !window.matchview) return;
+
+    const containerEl = containerRef.current;
+    if (!containerEl) return;
+
+    // Get the container's position on screen for absolute rect calculation
+    const domRect = containerEl.getBoundingClientRect();
+    const scaleX = window.devicePixelRatio ?? 1;
+    const scaleY = window.devicePixelRatio ?? 1;
+
+    const stillNeeded = new Set<string>();
+
+    for (const slot of layout.slots) {
+      const match = matches.find((m) => m.id === slot.matchId);
+      if (!match) continue;
+
+      stillNeeded.add(slot.matchId);
+
+      // Physical pixel rect covering this slot on screen
+      const rect = {
+        x: Math.round((domRect.left + slot.rect.x) * scaleX),
+        y: Math.round((domRect.top + slot.rect.y) * scaleY),
+        width: Math.round(slot.rect.width * scaleX),
+        height: Math.round(slot.rect.height * scaleY),
+      };
+
+      if (mountedRef.current.has(slot.matchId)) {
+        // Already mounted — just resize
+        await window.matchview.streaming.resize(slot.matchId, rect);
+      } else {
+        // New slot — probe then mount (or launch external)
+        const probe = await window.matchview.streaming.probeEmbedCompatibility(match.url);
+        if (probe.embeddable) {
+          await window.matchview.streaming.mountEmbedded(slot.matchId, match.url, rect);
+          mountedRef.current.add(slot.matchId);
+        } else {
+          // Site blocks embedding — open in external browser window
+          await window.matchview.streaming.launchExternal(slot.matchId, "system", rect);
+          // Don't add to mountedRef; external windows aren't managed by us
+        }
+      }
+    }
+
+    // Unmount any slots that are no longer in the layout
+    for (const id of [...mountedRef.current]) {
+      if (!stillNeeded.has(id)) {
+        await window.matchview.streaming.unmount(id);
+        mountedRef.current.delete(id);
+      }
+    }
+  }, [matches]);
+
+  useEffect(() => {
+    void mountStreams(computedLayout);
+  }, [computedLayout, mountStreams]);
+
+  // --- Unmount all BrowserViews when leaving the live screen ---
+  useEffect(() => {
+    return () => {
+      void window.matchview?.streaming.unmount("__all__"); // signal ignored; use unmountAll below
+      void window.matchview?.streaming.unmountAll?.();
+      mountedRef.current.clear();
+    };
+  }, []);
+
+  // --- Overlay events ---
   useEffect(() => {
     const unsubShow = window.matchview?.events.onOverlayShow((overlay) => {
       useAppStore.getState().setActiveOverlay(overlay);

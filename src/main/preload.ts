@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld("matchview", {
       ipcRenderer.invoke("streaming:mount", matchId, url, rect),
     resize: (matchId: string, rect: Rect) => ipcRenderer.invoke("streaming:resize", matchId, rect),
     unmount: (matchId: string) => ipcRenderer.invoke("streaming:unmount", matchId),
+    unmountAll: () => ipcRenderer.invoke("streaming:unmountAll"),
     launchExternal: (matchId: string, browser: string, rect: Rect) =>
       ipcRenderer.invoke("streaming:launchExternal", matchId, browser, rect),
   },

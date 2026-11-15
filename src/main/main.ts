@@ -10,6 +10,7 @@ import { StreamingManager } from "./streaming/StreamingManager";
 import { DEFAULT_EVENT_SETTINGS, type EventSettings, type FootballEvent } from "../shared/types";
 
 let mainWindow: BrowserWindow | null = null;
+let streamingManager: StreamingManager | null = null;
 
 const screenAdapter: ScreenLike = {
   getAllDisplays: () =>
@@ -85,6 +86,18 @@ function createWindow(): void {
 
   void mainWindow.loadFile(path.join(__dirname, "../renderer/index.html"));
 
+  // Wire StreamingManager now that we have a window
+  streamingManager = new StreamingManager(mainWindow, {
+    create: () => new BrowserView({
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        // Allow autoplay so video streams start without user gesture
+        autoplayPolicy: "no-user-gesture-required",
+      },
+    }),
+  });
+
   monitorService.start();
   schedulerTickHandle = setInterval(() => overlayScheduler.tick(), 250);
 
@@ -135,8 +148,34 @@ function registerIpcHandlers(): void {
     }
   });
 
-  // Streaming IPC is intentionally thin here; a full BrowserView-backed
-  // StreamingManager is wired once `mainWindow` exists - see createWindow.
+  // Streaming IPC — now fully wired using the StreamingManager created in createWindow()
+  ipcMain.handle("streaming:probe", (_e, url: string) => {
+    if (!streamingManager) return { embeddable: false, reason: "App not ready", checkedAt: Date.now() };
+    return streamingManager.probeEmbedCompatibility(url);
+  });
+
+  ipcMain.handle("streaming:mount", (_e, matchId: string, url: string, rect: { x: number; y: number; width: number; height: number }) => {
+    if (!streamingManager) return;
+    streamingManager.mountEmbedded(matchId, url, rect);
+  });
+
+  ipcMain.handle("streaming:resize", (_e, matchId: string, rect: { x: number; y: number; width: number; height: number }) => {
+    streamingManager?.resize(matchId, rect);
+  });
+
+  ipcMain.handle("streaming:unmount", (_e, matchId: string) => {
+    streamingManager?.unmount(matchId);
+  });
+
+  ipcMain.handle("streaming:unmountAll", () => {
+    streamingManager?.unmountAll();
+  });
+
+  ipcMain.handle("streaming:launchExternal", (_e, matchId: string, browser: string, rect: { x: number; y: number; width: number; height: number }) => {
+    if (!streamingManager) return;
+    const match = db.listMatchSources().find((m) => m.id === matchId);
+    if (match) streamingManager.launchExternal(match, browser as "chrome" | "edge" | "brave" | "system", rect);
+  });
 }
 
 app.whenReady().then(() => {
@@ -156,8 +195,6 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-// Suppress unused-import lint noise for BrowserView and StreamingManager, which are
-// referenced by type in StreamingManager's factory wiring (kept here as the documented
-// integration point for Phase 4 completion).
+// Suppress unused-import lint noise for BrowserView, kept as the documented
+// integration point (now actively used via streamingManager factory above).
 void BrowserView;
-void StreamingManager;
