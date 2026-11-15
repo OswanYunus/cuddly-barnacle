@@ -120,4 +120,30 @@ describe("AppDatabase persistence", () => {
     expect(JSON.stringify(prefs)).not.toMatch(/apiKey|api_key|secret/i);
     db.close();
   });
+
+  test("shared links: save, list newest first, and delete", () => {
+    const db = new AppDatabase(":memory:");
+    db.saveSharedLink({
+      id: "s1",
+      label: "Match 1",
+      url: "https://example.com/1",
+      source: "You",
+      createdAt: 1000,
+    });
+    db.saveSharedLink({
+      id: "s2",
+      label: "Match 2",
+      url: "https://example.com/2",
+      source: "Peer",
+      createdAt: 2000,
+    });
+
+    const list = db.listSharedLinks();
+    expect(list.length).toBe(2);
+    expect(list[0]?.id).toBe("s2"); // newest first
+
+    db.deleteSharedLink("s1");
+    expect(db.listSharedLinks().map((s) => s.id)).toEqual(["s2"]);
+    db.close();
+  });
 });

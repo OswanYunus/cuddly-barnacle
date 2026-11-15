@@ -4,6 +4,7 @@ import type {
   EventSettings,
   MatchSource,
   SavedLayout,
+  SharedLink,
 } from "../../shared/types";
 import { DEFAULT_EVENT_SETTINGS } from "../../shared/types";
 
@@ -63,6 +64,14 @@ export class AppDatabase {
         provider_fixture_id TEXT,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS shared_links (
+        id TEXT PRIMARY KEY,
+        label TEXT NOT NULL,
+        url TEXT NOT NULL,
+        source TEXT NOT NULL,
+        created_at INTEGER NOT NULL
       );
     `);
 
@@ -220,5 +229,41 @@ export class AppDatabase {
 
   deleteMatchSource(id: string): void {
     this.db.prepare("DELETE FROM match_sources WHERE id = ?").run(id);
+  }
+
+  // ---------- Shared links (Discovery) ----------
+
+  listSharedLinks(): SharedLink[] {
+    const rows = this.db
+      .prepare("SELECT * FROM shared_links ORDER BY created_at DESC")
+      .all() as Array<{
+      id: string;
+      label: string;
+      url: string;
+      source: string;
+      created_at: number;
+    }>;
+    return rows.map((r) => ({
+      id: r.id,
+      label: r.label,
+      url: r.url,
+      source: r.source,
+      createdAt: r.created_at,
+    }));
+  }
+
+  saveSharedLink(link: SharedLink): void {
+    this.db
+      .prepare(
+        `INSERT INTO shared_links (id, label, url, source, created_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           label = excluded.label, url = excluded.url, source = excluded.source, created_at = excluded.created_at`,
+      )
+      .run(link.id, link.label, link.url, link.source, link.createdAt);
+  }
+
+  deleteSharedLink(id: string): void {
+    this.db.prepare("DELETE FROM shared_links WHERE id = ?").run(id);
   }
 }

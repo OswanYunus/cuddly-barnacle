@@ -32,6 +32,42 @@ export function SessionConfig(): React.ReactElement {
 
   const [label, setLabel] = useState("");
   const [url, setUrl] = useState("");
+  const [sharedAlert, setSharedAlert] = useState<string | null>(null);
+
+  const handleShareMatch = async (match: MatchSource) => {
+    if (!window.matchview) return;
+    await window.matchview.discovery.saveSharedLink({
+      id: match.id,
+      label: match.label,
+      url: match.url,
+      source: "You",
+      createdAt: Date.now(),
+    });
+    await window.matchview.discovery.startBroadcast(
+      matches.map((m) => ({ label: m.label, url: m.url })),
+    );
+    setSharedAlert(`"${match.label}" posted to Discover Matches!`);
+    setTimeout(() => setSharedAlert(null), 3000);
+  };
+
+  const handleShareAllMatches = async () => {
+    if (!window.matchview || matches.length === 0) return;
+    const now = Date.now();
+    for (const m of matches) {
+      await window.matchview.discovery.saveSharedLink({
+        id: m.id,
+        label: m.label,
+        url: m.url,
+        source: "You",
+        createdAt: now,
+      });
+    }
+    await window.matchview.discovery.startBroadcast(
+      matches.map((m) => ({ label: m.label, url: m.url })),
+    );
+    setSharedAlert(`All ${matches.length} matches posted to Discover Matches!`);
+    setTimeout(() => setSharedAlert(null), 3000);
+  };
 
   const selectedMonitor = monitors.find((m) => m.id === selectedMonitorId) ?? monitors[0];
 
@@ -71,6 +107,31 @@ export function SessionConfig(): React.ReactElement {
 
       <main style={{ flex: 1, display: "flex", overflow: "hidden" }}>
         <div style={{ flex: 1, padding: "var(--mv-space-6)", overflowY: "auto" }}>
+          {sharedAlert && (
+            <div
+              style={{
+                background: "rgba(232, 163, 61, 0.15)",
+                border: "1px solid var(--mv-accent)",
+                color: "var(--mv-text-primary)",
+                borderRadius: "var(--mv-radius-sm)",
+                padding: "var(--mv-space-2) var(--mv-space-4)",
+                fontSize: 13,
+                marginBottom: "var(--mv-space-4)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
+            >
+              <span>✓ {sharedAlert}</span>
+              <button
+                onClick={() => setScreen("discovery")}
+                style={{ ...ghostBtn, fontSize: 12, padding: "2px 8px" }}
+              >
+                View in Discover Matches →
+              </button>
+            </div>
+          )}
+
           <h3>1. Display</h3>
           <div style={{ display: "flex", gap: "var(--mv-space-3)", flexWrap: "wrap", marginBottom: "var(--mv-space-5)" }}>
             {monitors.length === 0 && (
@@ -97,7 +158,18 @@ export function SessionConfig(): React.ReactElement {
             ))}
           </div>
 
-          <h3>2. Match sources</h3>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--mv-space-3)" }}>
+            <h3 style={{ margin: 0 }}>2. Match sources</h3>
+            {matches.length > 0 && (
+              <button
+                onClick={() => void handleShareAllMatches()}
+                style={{ ...ghostBtn, fontSize: 12, padding: "3px 8px" }}
+                title="Post all current match links to Discover Matches"
+              >
+                📡 Share All to Discover
+              </button>
+            )}
+          </div>
           <div style={{ display: "flex", gap: "var(--mv-space-2)", marginBottom: "var(--mv-space-3)" }}>
             <input
               placeholder="Home Team vs Away Team"
@@ -171,6 +243,13 @@ export function SessionConfig(): React.ReactElement {
                     </option>
                   ))}
                 </select>
+                <button
+                  onClick={() => void handleShareMatch(m)}
+                  style={{ ...ghostBtn, fontSize: 11, padding: "2px 8px" }}
+                  title="Post this match link to Discover Matches"
+                >
+                  📡 Share
+                </button>
                 <button onClick={() => removeMatch(m.id)} style={removeButtonStyle}>
                   Remove
                 </button>
@@ -284,4 +363,13 @@ const removeButtonStyle: React.CSSProperties = {
   color: "var(--mv-text-secondary)",
   borderRadius: "var(--mv-radius-sm)",
   padding: "var(--mv-space-1) var(--mv-space-3)",
+};
+
+const ghostBtn: React.CSSProperties = {
+  background: "transparent",
+  border: "1px solid var(--mv-bg-hairline)",
+  color: "var(--mv-text-secondary)",
+  borderRadius: "var(--mv-radius-sm)",
+  padding: "4px 10px",
+  cursor: "pointer",
 };

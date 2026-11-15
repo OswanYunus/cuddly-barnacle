@@ -1,82 +1,110 @@
+> ## Look to your right dummy. Do you see the **Releases** button?
+> Click it because there is where the app is and you download that. Do that unless you are a developer and know how to clone repos to make them run on your machine locally instead of electron builder blah blah blah. Just click the **Releases** button and watch your 8 plus matches for free with no ads.
+
 # MatchView
 
-Professional multi-match football viewing desktop application for Windows.
-Electron + TypeScript + React + Zustand + SQLite.
+Multi-match football viewing desktop application for Windows. Built with Electron, TypeScript, React, Zustand, and SQLite.
 
-See `LIMITATIONS.md` for an honest account of what's tested-and-working vs.
-what needs a real Windows machine / API credentials / streaming URLs to verify.
+MatchView is a client-side layout and viewing engine. It does not host, restream, or retransmit video content. Users input or share links from external broadcasting providers; MatchView renders each stream into an isolated, ad-blocked view tile on your chosen monitor.
 
-## Requirements
+---
 
-- Node.js 18+ (built/tested here with Node 22)
-- Windows 10/11 for actually running and packaging the app
-- (Optional, for live goal overlays) an API-FOOTBALL API key — https://www.api-football.com/
+## Features
 
-## Setup
+- **Multi-Match Tiling**: View up to 5 concurrent matches (side-by-side, stacked, 3-primary, 4-grid, 5-primary focus) with automatic display-aware aspect ratios.
+- **Aggressive Ad & Popup Blocking**: Built-in popup suppression (`setWindowOpenHandler({ action: "deny" })`) and network-level ad/tracker filtering in a dedicated partition (`persist:streams`).
+- **Persistent Sessions**: Navigating back to Sources hides rather than destroys BrowserViews. Stream connections, authentication cookies, and CAPTCHA solutions stay alive without reloading.
+- **Link Discovery & Sharing**:
+  - Local Network (LAN) discovery via UDP multicast (`239.255.42.99:47698`) with zero central servers.
+  - Portable base64 share codes for copying and sharing match links across platforms (chat, Discord).
+  - One-click "Watch in MatchView" import directly from the Discover catalog.
+- **Live Goal & Card Overlays**: Optional background polling via API-FOOTBALL with encrypted key storage (`safeStorage` / DPAPI). Automatically highlights the active match tile when a goal occurs.
+
+---
+
+## How Link Sharing Works
+
+1. MatchView does not host streams. Users who find or subscribe to a match URL (e.g. Manchester United vs Liverpool) can post it to **Discover Matches**.
+2. Posted links appear instantly in the local Discover catalog and broadcast across the local network.
+3. Other viewers can:
+   - Click **Copy Link** to copy the original broadcaster URL to clipboard.
+   - Click **Watch in MatchView** to auto-load the link into their session.
+   - Paste links manually into **Sources** (`Home Team vs Away Team` + `Stream URL`).
+4. Hitting **Start session** renders each match in its own hardware-accelerated tile directly from the original source.
+
+---
+
+## Developer Setup
+
+### Prerequisites
+
+- Windows 10 or 11
+- Node.js 18+ (tested on Node 22 and 24)
+- Visual Studio C++ Build Tools (required by `better-sqlite3` native compilation)
+
+### Install Dependencies
 
 ```bash
 npm install
 ```
 
-`better-sqlite3` is a native module; `npm install` compiles it for your platform
-automatically via node-gyp/prebuild-install. If that fails on your machine you
-likely need the Visual Studio Build Tools (Windows) or an equivalent C++ toolchain.
+*Note: Native compilation is handled automatically through `node-gyp` with overridden modern toolchain support.*
 
-## Running in development
+### Running in Development
 
 ```bash
-npm run build          # compiles src/main + src/shared -> dist/
-npm run build:renderer # bundles src/renderer -> dist/renderer via Vite
-npm start               # runs electron against the compiled output
+npm run build           # Compiles main process TypeScript -> dist/
+npm run build:renderer  # Bundles React frontend via Vite -> dist/renderer
+npm start               # Launches Electron application
 ```
 
-(`npm start` currently chains `build` + `electron .`; run `build:renderer` once
-beforehand, or add it to the `start` script if you want a single command — it
-was kept separate here so renderer iteration can use `npm run dev:renderer`
-with Vite's dev server instead, if you prefer hot reload while working on UI.)
+For hot-reload UI development:
+```bash
+npm run dev:renderer    # Vite dev server
+```
 
-## Running tests
+### Running Tests
 
 ```bash
-npm test             # 86 tests, no external services or Windows required
-npm run test:coverage
-npm run typecheck    # strict TypeScript, whole project
+npm test                # 87 Jest tests across layout, monitor, persistence, and event scheduler
+npm run typecheck       # Strict TypeScript verification across main, renderer, and shared
+npm run lint            # ESLint rules check
 ```
 
-All of the above were actually executed during development of this codebase
-(not just written) — see `LIMITATIONS.md` for the exact output.
+*The `pretest` hook automatically manages the `better-sqlite3` ABI between Node and Electron.*
 
-## Configuring live goal overlays
-
-1. Get an API-FOOTBALL key (note their free tier is 100 req/day — not enough for
-   continuous polling of several live fixtures; you'll likely want a paid tier
-   for real use).
-2. Launch the app → Settings → Event API → paste the key → Save. It's encrypted
-   at rest via Electron's `safeStorage` (Windows DPAPI) in your user-data folder,
-   never written to the SQLite database or the repo.
-3. In Session Config, when adding a match, you'll eventually want to link it to
-   a provider fixture id (the API-FOOTBALL fixture id for that game) so detected
-   events are matched to the right viewing tile — the data model
-   (`MatchSource.providerFixtureId`) supports this; wiring a fixture-search UI
-   into Session Config is a natural next increment.
-
-## Packaging for Windows
+### Packaging Installer
 
 ```bash
-npm run dist:win
+npm run rebuild:electron   # Rebuild native modules for Electron ABI
+npx electron-builder --win # Produces release/MatchView Setup 0.1.0.exe (NSIS)
 ```
 
-Produces an NSIS installer under `release/` via `electron-builder`, using
-`assets/icon.ico` for both the app and installer branding. This step needs to
-be run on Windows (or a configured cross-build host) — see `LIMITATIONS.md`.
+---
 
-## Project layout
+## Project Structure
 
 ```
 src/
-  main/        Electron main process: monitors, persistence, events, streaming, config
-  renderer/    React UI: screens, store, layout engine, styles
-  shared/      Types shared between main and renderer
-tests/         Jest test suites (layout, monitors, events/overlays, persistence)
-assets/        Application icon source (SVG) and generated .ico
+  main/
+    discovery/         LAN UDP multicast and share-code codec
+    events/            API-FOOTBALL poller and overlay scheduler
+    monitors/          Windows display enumeration and resolution detection
+    persistence/       SQLite storage (better-sqlite3) and DPAPI secure config
+    streaming/         BrowserView manager, layout positioning, ad-blocking
+    main.ts            Electron entry point and IPC registry
+    preload.ts         Context bridge exposing matchview API to renderer
+  renderer/
+    screens/           Dashboard, SessionConfig, LiveViewing, Discovery, Settings, Events
+    layout/            Tiling math, aspect-ratio fitting, and priority slot allocation
+    store/             Zustand state store
+  shared/
+    types.ts           Shared data structures, event definitions, layout contracts
+tests/                 Unit and integration tests (layoutEngine, eventMonitor, persistence, etc.)
 ```
+
+---
+
+## License
+
+MIT

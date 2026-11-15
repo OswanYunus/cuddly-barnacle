@@ -9,6 +9,7 @@ import type {
   Rect,
   SavedLayout,
   ScheduledOverlay,
+  SharedLink,
   SharedMatchEntry,
 } from "@shared/types";
 
@@ -56,6 +57,9 @@ export interface MatchViewBridge {
     isEnabled(): Promise<boolean>;
   };
   discovery: {
+    listSharedLinks(): Promise<SharedLink[]>;
+    saveSharedLink(link: SharedLink): Promise<void>;
+    deleteSharedLink(id: string): Promise<void>;
     startBroadcast(matches: SharedMatchEntry[]): Promise<void>;
     stopBroadcast(): Promise<void>;
     generateCode(matches: SharedMatchEntry[]): Promise<string>;

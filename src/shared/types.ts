@@ -180,6 +180,14 @@ export interface AppPreferences {
 
 // ---------- Discovery ----------
 
+export interface SharedLink {
+  id: string;
+  label: string;
+  url: string;
+  source: string;
+  createdAt: number;
+}
+
 export interface SharedMatchEntry {
   label: string;
   url: string;

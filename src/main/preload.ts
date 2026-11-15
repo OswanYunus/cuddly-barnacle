@@ -9,6 +9,7 @@ import type {
   Rect,
   SavedLayout,
   ScheduledOverlay,
+  SharedLink,
   SharedMatchEntry,
 } from "../shared/types";
 
@@ -80,6 +81,9 @@ contextBridge.exposeInMainWorld("matchview", {
     isEnabled: (): Promise<boolean> => ipcRenderer.invoke("adblocker:isEnabled"),
   },
   discovery: {
+    listSharedLinks: (): Promise<SharedLink[]> => ipcRenderer.invoke("discovery:listSharedLinks"),
+    saveSharedLink: (link: SharedLink): Promise<void> => ipcRenderer.invoke("discovery:saveSharedLink", link),
+    deleteSharedLink: (id: string): Promise<void> => ipcRenderer.invoke("discovery:deleteSharedLink", id),
     startBroadcast: (matches: SharedMatchEntry[]) => ipcRenderer.invoke("discovery:startBroadcast", matches),
     stopBroadcast: () => ipcRenderer.invoke("discovery:stopBroadcast"),
     generateCode: (matches: SharedMatchEntry[]): Promise<string> =>

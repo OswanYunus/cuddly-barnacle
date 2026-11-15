@@ -214,6 +214,9 @@ function registerIpcHandlers(): void {
   });
 
   // ── Discovery ─────────────────────────────────────────────────────────────
+  ipcMain.handle("discovery:listSharedLinks", () => db.listSharedLinks());
+  ipcMain.handle("discovery:saveSharedLink", (_e, link) => db.saveSharedLink(link));
+  ipcMain.handle("discovery:deleteSharedLink", (_e, id: string) => db.deleteSharedLink(id));
   ipcMain.handle("discovery:startBroadcast", (_e, matches: Array<{ label: string; url: string }>) => {
     lanDiscovery?.startBroadcasting(matches);
   });
