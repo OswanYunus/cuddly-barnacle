@@ -1,0 +1,9 @@
+node_modules/
+dist/
+release/
+coverage/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.key.enc
+.DS_Store

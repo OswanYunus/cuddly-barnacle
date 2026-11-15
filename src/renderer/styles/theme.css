@@ -1,0 +1,130 @@
+/*
+  MATCHVIEW design system.
+
+  Direction: broadcast control-room software, not a generic SaaS dashboard.
+  - Typography: a condensed grotesque for scores/labels (broadcast lower-third
+    feel) paired with a humanist sans for body text. No system-default "Inter
+    everywhere" look.
+  - Palette: near-black charcoal base (not pure black - reduces OLED smear
+    and looks less "hacker terminal"), a single confident accent (signal
+    amber) reserved ONLY for live/priority/attention states, and a cool
+    desaturated blue-grey for structural UI. No purple/blue gradients.
+  - Flat surfaces, 1px hairline borders, no glow, no glassmorphism, minimal
+    shadow (one soft elevation level for floating panels only).
+*/
+
+@font-face {
+  font-family: "Oswald";
+  src: local("Oswald");
+  font-weight: 400 700;
+}
+
+:root {
+  /* Surfaces */
+  --mv-bg-base: #14161a;
+  --mv-bg-raised: #1b1e24;
+  --mv-bg-panel: #20242b;
+  --mv-bg-hairline: #2c313a;
+  --mv-bg-overlay-scrim: rgba(10, 11, 13, 0.82);
+
+  /* Text */
+  --mv-text-primary: #eef0f3;
+  --mv-text-secondary: #9aa2ad;
+  --mv-text-tertiary: #646c78;
+
+  /* Accent: signal amber, used sparingly and deliberately */
+  --mv-accent: #e8a33d;
+  --mv-accent-strong: #f4b85a;
+  --mv-accent-text-on: #14161a;
+
+  /* Status */
+  --mv-live: #d94f4f;
+  --mv-success: #4fae73;
+  --mv-warning: #e8a33d;
+  --mv-critical: #d94f4f;
+
+  /* Priority tiers (desaturated, distinguishable without being loud) */
+  --mv-priority-1: #e8a33d;
+  --mv-priority-2: #7fa7c9;
+  --mv-priority-3: #8a93a3;
+  --mv-priority-4: #6b7280;
+  --mv-priority-5: #565c66;
+
+  /* Typography */
+  --mv-font-display: "Oswald", "Arial Narrow", sans-serif;
+  --mv-font-body: "Segoe UI", "Source Sans Pro", system-ui, sans-serif;
+  --mv-font-mono: "Cascadia Code", "Consolas", monospace;
+
+  /* Spacing scale (4px base) */
+  --mv-space-1: 4px;
+  --mv-space-2: 8px;
+  --mv-space-3: 12px;
+  --mv-space-4: 16px;
+  --mv-space-5: 24px;
+  --mv-space-6: 32px;
+  --mv-space-7: 48px;
+
+  /* Radii: restrained, not "everything is a rounded card" */
+  --mv-radius-sm: 3px;
+  --mv-radius-md: 5px;
+
+  /* Elevation: one level only */
+  --mv-shadow-panel: 0 4px 16px rgba(0, 0, 0, 0.35);
+
+  /* Motion */
+  --mv-ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+  --mv-duration-fast: 120ms;
+  --mv-duration-base: 220ms;
+  --mv-duration-overlay: 320ms;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--mv-bg-base);
+  color: var(--mv-text-primary);
+  font-family: var(--mv-font-body);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--mv-font-display);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+h1 {
+  font-size: 28px;
+}
+h2 {
+  font-size: 18px;
+}
+h3 {
+  font-size: 13px;
+  color: var(--mv-text-secondary);
+  letter-spacing: 0.06em;
+}
+
+button {
+  font-family: var(--mv-font-body);
+  cursor: pointer;
+}
+
+a {
+  color: inherit;
+}

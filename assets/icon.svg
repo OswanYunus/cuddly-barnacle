@@ -1,0 +1,26 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <rect width="512" height="512" rx="96" fill="#14161a"/>
+  <!-- Four viewing tiles: three in structural blue-grey, one in signal amber
+       to represent the priority/overlay match - this is the core visual
+       metaphor of the product (multiple feeds, one brought to prominence). -->
+  <g>
+    <rect x="48" y="48" width="192" height="192" rx="10" fill="#20242b" stroke="#2c313a" stroke-width="4"/>
+    <rect x="80" y="104" width="128" height="4" fill="#565c66"/>
+    <rect x="80" y="104" width="128" height="80" fill="none" stroke="#565c66" stroke-width="3"/>
+    <circle cx="144" cy="144" r="3" fill="#565c66"/>
+
+    <rect x="272" y="48" width="192" height="192" rx="10" fill="#20242b" stroke="#2c313a" stroke-width="4"/>
+    <rect x="304" y="104" width="128" height="80" fill="none" stroke="#565c66" stroke-width="3"/>
+    <circle cx="368" cy="144" r="3" fill="#565c66"/>
+
+    <rect x="48" y="272" width="192" height="192" rx="10" fill="#20242b" stroke="#2c313a" stroke-width="4"/>
+    <rect x="80" y="328" width="128" height="80" fill="none" stroke="#565c66" stroke-width="3"/>
+    <circle cx="144" cy="368" r="3" fill="#565c66"/>
+
+    <!-- Priority tile: amber border + fill tint, slightly larger to read as
+         "brought to prominence" even at small icon sizes. -->
+    <rect x="266" y="266" width="204" height="204" rx="12" fill="#2a2210" stroke="#e8a33d" stroke-width="7"/>
+    <rect x="300" y="326" width="136" height="84" fill="none" stroke="#f4b85a" stroke-width="4"/>
+    <circle cx="368" cy="368" r="4" fill="#f4b85a"/>
+  </g>
+</svg>
