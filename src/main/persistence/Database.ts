@@ -4,8 +4,8 @@ import type {
   EventSettings,
   MatchSource,
   SavedLayout,
-} from "@shared/types";
-import { DEFAULT_EVENT_SETTINGS } from "@shared/types";
+} from "../../shared/types";
+import { DEFAULT_EVENT_SETTINGS } from "../../shared/types";
 
 const SCHEMA_VERSION = 1;
 

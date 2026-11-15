@@ -7,7 +7,7 @@ import { ApiFootballProvider } from "./events/providers/ApiFootballProvider";
 import { EventMonitor } from "./events/EventMonitor";
 import { OverlayScheduler } from "./events/OverlayScheduler";
 import { StreamingManager } from "./streaming/StreamingManager";
-import { DEFAULT_EVENT_SETTINGS, type EventSettings, type FootballEvent } from "@shared/types";
+import { DEFAULT_EVENT_SETTINGS, type EventSettings, type FootballEvent } from "../shared/types";
 
 let mainWindow: BrowserWindow | null = null;
 

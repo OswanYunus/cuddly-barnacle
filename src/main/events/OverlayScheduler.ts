@@ -3,7 +3,7 @@ import type {
   FootballEvent,
   MatchSource,
   ScheduledOverlay,
-} from "@shared/types";
+} from "../../shared/types";
 
 export interface OverlayClock {
   now(): number;

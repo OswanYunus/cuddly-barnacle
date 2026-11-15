@@ -1,4 +1,4 @@
-import type { MonitorInfo, Rect } from "@shared/types";
+import type { MonitorInfo, Rect } from "../../shared/types";
 
 /**
  * Minimal surface of Electron's `screen` module that we depend on.

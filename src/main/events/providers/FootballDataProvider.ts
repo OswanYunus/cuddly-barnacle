@@ -1,4 +1,4 @@
-import type { FootballEvent, ProviderStatus } from "@shared/types";
+import type { FootballEvent, ProviderStatus } from "../../../shared/types";
 
 /**
  * FootballDataProvider

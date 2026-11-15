@@ -8,7 +8,7 @@ import type {
   Rect,
   SavedLayout,
   ScheduledOverlay,
-} from "@shared/types";
+} from "../shared/types";
 
 /**
  * Preload bridge. Runs in an isolated context with access to Node/Electron

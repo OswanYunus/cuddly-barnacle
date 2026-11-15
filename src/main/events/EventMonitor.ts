@@ -1,4 +1,4 @@
-import type { FootballEvent } from "@shared/types";
+import type { FootballEvent } from "../../shared/types";
 import type { FootballDataProvider } from "./providers/FootballDataProvider";
 
 export type EventMonitorListener = (events: FootballEvent[]) => void;
