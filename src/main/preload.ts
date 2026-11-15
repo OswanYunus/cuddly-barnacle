@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
   AppPreferences,
+  DiscoveredSession,
   EventSettings,
   FootballEvent,
   MatchSource,
@@ -8,14 +9,9 @@ import type {
   Rect,
   SavedLayout,
   ScheduledOverlay,
+  SharedMatchEntry,
 } from "../shared/types";
 
-/**
- * Preload bridge. Runs in an isolated context with access to Node/Electron
- * APIs, but only exposes the specific functions below to the renderer
- * (contextIsolation: true, nodeIntegration: false in main.ts) - the
- * renderer can never reach ipcRenderer, fs, or child_process directly.
- */
 contextBridge.exposeInMainWorld("matchview", {
   monitors: {
     list: (): Promise<MonitorInfo[]> => ipcRenderer.invoke("monitors:list"),
@@ -43,6 +39,10 @@ contextBridge.exposeInMainWorld("matchview", {
     resize: (matchId: string, rect: Rect) => ipcRenderer.invoke("streaming:resize", matchId, rect),
     unmount: (matchId: string) => ipcRenderer.invoke("streaming:unmount", matchId),
     unmountAll: () => ipcRenderer.invoke("streaming:unmountAll"),
+    hideAll: () => ipcRenderer.invoke("streaming:hideAll"),
+    showAll: () => ipcRenderer.invoke("streaming:showAll"),
+    listMounted: (): Promise<Array<{ matchId: string; url: string }>> =>
+      ipcRenderer.invoke("streaming:listMounted"),
     launchExternal: (matchId: string, browser: string, rect: Rect) =>
       ipcRenderer.invoke("streaming:launchExternal", matchId, browser, rect),
   },
@@ -74,5 +74,22 @@ contextBridge.exposeInMainWorld("matchview", {
     dismissOverlay: (overlayId: string) => ipcRenderer.invoke("events:dismissOverlay", overlayId),
     setPaused: (paused: boolean) => ipcRenderer.invoke("events:setPaused", paused),
     updateSettings: (settings: EventSettings) => ipcRenderer.invoke("events:updateSettings", settings),
+  },
+  adBlocker: {
+    setEnabled: (enabled: boolean) => ipcRenderer.invoke("adblocker:setEnabled", enabled),
+    isEnabled: (): Promise<boolean> => ipcRenderer.invoke("adblocker:isEnabled"),
+  },
+  discovery: {
+    startBroadcast: (matches: SharedMatchEntry[]) => ipcRenderer.invoke("discovery:startBroadcast", matches),
+    stopBroadcast: () => ipcRenderer.invoke("discovery:stopBroadcast"),
+    generateCode: (matches: SharedMatchEntry[]): Promise<string> =>
+      ipcRenderer.invoke("discovery:generateCode", matches),
+    decodeCode: (code: string): Promise<{ matches: SharedMatchEntry[] | null; error: string | null }> =>
+      ipcRenderer.invoke("discovery:decodeCode", code),
+    onPeers: (cb: (peers: DiscoveredSession[]) => void) => {
+      const listener = (_e: unknown, peers: DiscoveredSession[]) => cb(peers);
+      ipcRenderer.on("discovery:peers", listener);
+      return () => ipcRenderer.removeListener("discovery:peers", listener);
+    },
   },
 });

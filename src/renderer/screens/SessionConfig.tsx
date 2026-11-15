@@ -52,8 +52,21 @@ export function SessionConfig(): React.ReactElement {
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      <header style={{ padding: "var(--mv-space-5) var(--mv-space-6)", borderBottom: "1px solid var(--mv-bg-hairline)" }}>
-        <h2>Session configuration</h2>
+      <header style={{ padding: "var(--mv-space-5) var(--mv-space-6)", borderBottom: "1px solid var(--mv-bg-hairline)", display: "flex", alignItems: "center", gap: "var(--mv-space-4)" }}>
+        <h2 style={{ flex: 1 }}>Session configuration</h2>
+        <button
+          onClick={() => setScreen("discovery")}
+          style={{
+            background: "transparent",
+            border: "1px solid var(--mv-bg-hairline)",
+            color: "var(--mv-text-secondary)",
+            borderRadius: "var(--mv-radius-sm)",
+            padding: "var(--mv-space-2) var(--mv-space-4)",
+            fontSize: 12,
+          }}
+        >
+          📡 Discover links
+        </button>
       </header>
 
       <main style={{ flex: 1, display: "flex", overflow: "hidden" }}>

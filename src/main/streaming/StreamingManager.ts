@@ -1,29 +1,6 @@
 import { spawn } from "node:child_process";
 import type { MatchSource, Rect } from "../../shared/types";
 
-/**
- * StreamingManager
- * ----------------
- * Implements the two viewing modes described in the spec:
- *
- * MODE A (embedded): an Electron BrowserView is created and navigated to
- * the match URL inside the main window. This works ONLY for sites that do
- * not send `X-Frame-Options: DENY/SAMEORIGIN` or a restrictive
- * `Content-Security-Policy: frame-ancestors`, and that do not gate content
- * behind DRM (Widevine/EME) requiring a full browser session with
- * first-party cookies MatchView cannot provide. We do not attempt to
- * bypass any of this - we probe for it and report the result honestly.
- *
- * MODE B (external): MatchView launches (or asks the OS to activate) a
- * top-level browser window pointed at the match URL, then uses the
- * window's native handle to position/size that window to match the
- * assigned layout slot. This is reliable for whole browser *windows*.
- * It is explicitly NOT reliable for repositioning a single *tab* inside a
- * multi-tab browser window the user already has open - Windows/Chromium
- * expose window handles, not tab handles, to external applications. The
- * UI must always make this distinction clear to the user.
- */
-
 export interface CompatibilityProbeResult {
   embeddable: boolean;
   reason: string | null;
@@ -34,6 +11,7 @@ export interface BrowserViewLike {
   webContents: {
     on(event: "did-fail-load", cb: (event: unknown, errorCode: number, errorDescription: string) => void): void;
     loadURL(url: string): Promise<void>;
+    setWindowOpenHandler(handler: (details: unknown) => { action: "deny" | "allow" }): void;
   };
   setBounds(rect: Rect): void;
 }
@@ -49,81 +27,129 @@ export interface BrowserViewFactory {
 
 export type SupportedBrowser = "chrome" | "edge" | "brave" | "system";
 
-/** Known executable launch strategies on Windows. User-configurable default lives in AppPreferences. */
 const WINDOWS_BROWSER_COMMANDS: Record<Exclude<SupportedBrowser, "system">, string> = {
   chrome: "chrome",
   edge: "msedge",
   brave: "brave",
 };
 
+/** Ad/tracker domains blocked in BrowserViews */
+const AD_PATTERNS: string[] = [
+  "doubleclick.net", "googlesyndication.com", "google-analytics.com",
+  "googletagmanager.com", "adnxs.com", "rubiconproject.com", "pubmatic.com",
+  "openx.net", "spotxchange.com", "springserve.com", "moatads.com",
+  "scorecardresearch.com", "quantserve.com", "outbrain.com", "taboola.com",
+  "popads.net", "popcash.net", "propellerads.com", "adcash.com",
+  "clickadu.com", "trafficjunky.com", "exoclick.com", "juicyads.com",
+  "hilltopads.net", "adsterra.com", "admaven.com", "bidvertiser.com",
+  "revcontent.com", "mgid.com", "monetag.com", "richpush.co",
+  "/ads/", "/ad/", "/adserver/", "/advertising/", "/tracker/",
+  "/analytics/", "/pixel/", "/beacon/", "/telemetry/",
+];
+
+export function isAdUrl(url: string): boolean {
+  const lower = url.toLowerCase();
+  return AD_PATTERNS.some((p) => lower.includes(p));
+}
+
+interface ViewState {
+  view: BrowserViewLike;
+  url: string;
+  savedBounds: Rect;
+  hidden: boolean;
+}
+
 export class StreamingManager {
-  private views = new Map<string, BrowserViewLike>();
+  private views = new Map<string, ViewState>();
+  private adBlockEnabled = true;
 
   constructor(
     private readonly window: MainWindowLike,
     private readonly viewFactory: BrowserViewFactory,
   ) {}
 
-  /**
-   * Performs a best-effort compatibility check by attempting to load the
-   * URL in an offscreen probe view and inspecting the failure reason.
-   * Electron surfaces frame-blocking as a `did-fail-load` with specific
-   * error codes (e.g. ERR_BLOCKED_BY_RESPONSE for X-Frame-Options/CSP).
-   * This is a real signal, not a guess - but a successful load does NOT
-   * guarantee DRM playback will actually work, since EME/Widevine
-   * failures often happen later, inside the page's own JS.
-   */
+  setAdBlockEnabled(enabled: boolean): void {
+    this.adBlockEnabled = enabled;
+  }
+
   async probeEmbedCompatibility(url: string): Promise<CompatibilityProbeResult> {
     const probe = this.viewFactory.create();
+    // Block popups in probe view too
+    probe.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
     return new Promise((resolve) => {
       let settled = false;
       probe.webContents.on("did-fail-load", (_e, errorCode, errorDescription) => {
         if (settled) return;
         settled = true;
-        const blocked = errorCode === -27 /* ERR_BLOCKED_BY_RESPONSE */;
+        const blocked = errorCode === -27;
         resolve({
           embeddable: false,
           reason: blocked
-            ? "This site blocks embedding (X-Frame-Options / Content-Security-Policy). Use External Browser mode."
-            : `Failed to load (${errorDescription}). Use External Browser mode.`,
+            ? "Site blocks embedding (X-Frame-Options / CSP). Opening in browser instead."
+            : `Failed to load (${errorDescription}). Opening in browser instead.`,
           checkedAt: Date.now(),
         });
       });
-
-      probe.webContents
-        .loadURL(url)
-        .then(() => {
-          if (settled) return;
-          settled = true;
-          resolve({ embeddable: true, reason: null, checkedAt: Date.now() });
-        })
-        .catch((err: Error) => {
-          if (settled) return;
-          settled = true;
-          resolve({ embeddable: false, reason: err.message, checkedAt: Date.now() });
-        });
+      probe.webContents.loadURL(url)
+        .then(() => { if (!settled) { settled = true; resolve({ embeddable: true, reason: null, checkedAt: Date.now() }); } })
+        .catch((err: Error) => { if (!settled) { settled = true; resolve({ embeddable: false, reason: err.message, checkedAt: Date.now() }); } });
     });
   }
 
   mountEmbedded(matchId: string, url: string, rect: Rect): BrowserViewLike {
     this.unmount(matchId);
     const view = this.viewFactory.create();
+
+    // Block all popup windows — biggest source of ads on streaming sites
+    view.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+
     this.window.addBrowserView(view);
     view.setBounds(rect);
     void view.webContents.loadURL(url);
-    this.views.set(matchId, view);
+    this.views.set(matchId, { view, url, savedBounds: rect, hidden: false });
     return view;
   }
 
   resize(matchId: string, rect: Rect): void {
-    const view = this.views.get(matchId);
-    if (view) view.setBounds(rect);
+    const state = this.views.get(matchId);
+    if (!state) return;
+    state.savedBounds = rect;
+    if (!state.hidden) state.view.setBounds(rect);
+  }
+
+  /**
+   * Hide all BrowserViews without destroying them.
+   * Used when navigating to Sources/Settings so the user doesn't lose their
+   * stream session (and doesn't have to re-solve CAPTCHAs on return).
+   */
+  hideAll(): void {
+    for (const state of this.views.values()) {
+      state.view.setBounds({ x: -32000, y: -32000, width: 1, height: 1 });
+      state.hidden = true;
+    }
+  }
+
+  /**
+   * Restore all hidden BrowserViews to their last known bounds.
+   */
+  showAll(): void {
+    for (const state of this.views.values()) {
+      if (state.hidden) {
+        state.view.setBounds(state.savedBounds);
+        state.hidden = false;
+      }
+    }
+  }
+
+  /** Returns the currently mounted match IDs and their URLs. */
+  listMounted(): Array<{ matchId: string; url: string }> {
+    return [...this.views.entries()].map(([matchId, s]) => ({ matchId, url: s.url }));
   }
 
   unmount(matchId: string): void {
-    const view = this.views.get(matchId);
-    if (view) {
-      this.window.removeBrowserView(view);
+    const state = this.views.get(matchId);
+    if (state) {
+      this.window.removeBrowserView(state.view);
       this.views.delete(matchId);
     }
   }
@@ -132,19 +158,6 @@ export class StreamingManager {
     for (const id of [...this.views.keys()]) this.unmount(id);
   }
 
-  /**
-   * Launches an external top-level browser window for a match that cannot
-   * be embedded. Returns immediately after spawning; actual window-handle
-   * based positioning is performed separately by WindowPositioner (Windows
-   * native, via a tiny native helper or `electron`'s
-   * `BrowserWindow.fromId`-style tracking is not possible for OS-level
-   * browser PIDs, so real positioning requires either (a) the user's
-   * browser supporting a `--window-position/--window-size` launch flag, or
-   * (b) a native Win32 helper using `EnumWindows`/`SetWindowPos` matched by
-   * window title). This method implements (a), which is the dependable
-   * part Chrome/Edge/Brave all actually support; (b) is documented as a
-   * known limitation of the initial release (see LIMITATIONS.md).
-   */
   launchExternal(match: MatchSource, browser: SupportedBrowser, slotRect: Rect): void {
     const args = [
       `--new-window`,
@@ -154,15 +167,14 @@ export class StreamingManager {
     ];
 
     if (browser === "system") {
-      // No positioning control at all when deferring to the OS default handler.
-      spawn(process.platform === "win32" ? "cmd" : "xdg-open", process.platform === "win32" ? ["/c", "start", "", match.url] : [match.url], {
-        detached: true,
-        stdio: "ignore",
-      }).unref();
+      spawn(
+        process.platform === "win32" ? "cmd" : "xdg-open",
+        process.platform === "win32" ? ["/c", "start", "", match.url] : [match.url],
+        { detached: true, stdio: "ignore" },
+      ).unref();
       return;
     }
 
-    const command = WINDOWS_BROWSER_COMMANDS[browser];
-    spawn(command, args, { detached: true, stdio: "ignore" }).unref();
+    spawn(WINDOWS_BROWSER_COMMANDS[browser], args, { detached: true, stdio: "ignore" }).unref();
   }
 }

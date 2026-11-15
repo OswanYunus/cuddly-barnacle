@@ -96,6 +96,7 @@ export class AppDatabase {
         preferredBrowser: "system",
         theme: "dark",
         eventSettings: DEFAULT_EVENT_SETTINGS,
+        adBlockerEnabled: true,
       };
     }
 
@@ -104,6 +105,7 @@ export class AppDatabase {
       preferredBrowser: row.preferred_browser,
       theme: row.theme,
       eventSettings: JSON.parse(row.event_settings_json) as EventSettings,
+      adBlockerEnabled: true,
     };
   }
 

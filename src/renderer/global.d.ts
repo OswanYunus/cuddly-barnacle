@@ -1,5 +1,6 @@
 import type {
   AppPreferences,
+  DiscoveredSession,
   EventSettings,
   FootballEvent,
   MatchSource,
@@ -8,6 +9,7 @@ import type {
   Rect,
   SavedLayout,
   ScheduledOverlay,
+  SharedMatchEntry,
 } from "@shared/types";
 
 export interface MatchViewBridge {
@@ -31,6 +33,9 @@ export interface MatchViewBridge {
     resize(matchId: string, rect: Rect): Promise<void>;
     unmount(matchId: string): Promise<void>;
     unmountAll(): Promise<void>;
+    hideAll(): Promise<void>;
+    showAll(): Promise<void>;
+    listMounted(): Promise<Array<{ matchId: string; url: string }>>;
     launchExternal(matchId: string, browser: string, rect: Rect): Promise<void>;
   };
   events: {
@@ -45,6 +50,17 @@ export interface MatchViewBridge {
     dismissOverlay(overlayId: string): Promise<void>;
     setPaused(paused: boolean): Promise<void>;
     updateSettings(settings: EventSettings): Promise<void>;
+  };
+  adBlocker: {
+    setEnabled(enabled: boolean): Promise<void>;
+    isEnabled(): Promise<boolean>;
+  };
+  discovery: {
+    startBroadcast(matches: SharedMatchEntry[]): Promise<void>;
+    stopBroadcast(): Promise<void>;
+    generateCode(matches: SharedMatchEntry[]): Promise<string>;
+    decodeCode(code: string): Promise<{ matches: SharedMatchEntry[] | null; error: string | null }>;
+    onPeers(cb: (peers: DiscoveredSession[]) => void): () => void;
   };
 }
 

@@ -174,4 +174,22 @@ export interface AppPreferences {
   preferredBrowser: "system" | "chrome" | "edge" | "brave";
   theme: "dark" | "light";
   eventSettings: EventSettings;
+  /** Ad blocker enabled in BrowserViews. Defaults to true. Not persisted to DB. */
+  adBlockerEnabled?: boolean;
+}
+
+// ---------- Discovery ----------
+
+export interface SharedMatchEntry {
+  label: string;
+  url: string;
+  competition?: string;
+}
+
+export interface DiscoveredSession {
+  /** UUID that uniquely identifies the broadcasting peer (not stored server-side) */
+  id: string;
+  hostName: string;
+  sharedAt: number;
+  matches: SharedMatchEntry[];
 }

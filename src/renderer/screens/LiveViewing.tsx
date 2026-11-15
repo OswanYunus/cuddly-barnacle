@@ -24,88 +24,107 @@ export function LiveViewing(): React.ReactElement {
   const setScreen = useAppStore((s) => s.setScreen);
 
   const containerRef = useRef<HTMLDivElement>(null);
-  // Track which match IDs are currently mounted so we can diff on layout changes
-  const mountedRef = useRef<Set<string>>(new Set());
+  // Track which match IDs are currently mounted with which URL
+  const mountedRef = useRef<Map<string, string>>(new Map()); // matchId → url
 
   // --- Layout measurement ---
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const observer = new ResizeObserver(() => {
-      recomputeLayout(el.clientWidth, el.clientHeight);
-    });
+    const observer = new ResizeObserver(() => recomputeLayout(el.clientWidth, el.clientHeight));
     observer.observe(el);
     recomputeLayout(el.clientWidth, el.clientHeight);
     return () => observer.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layoutKind, matches.length]);
 
-  // --- Mount / resize BrowserViews whenever the computed layout changes ---
+  // On first mount, resume any views that were hidden when we navigated to Sources
+  useEffect(() => {
+    void window.matchview?.streaming.showAll();
+
+    // Sync mountedRef with what's actually mounted in the main process
+    window.matchview?.streaming.listMounted().then((mounted) => {
+      mountedRef.current = new Map(mounted.map(({ matchId, url }) => [matchId, url]));
+    }).catch(() => { /* ignore */ });
+  }, []);
+
+  // On unmount (navigating away), hide views instead of destroying them
+  // so the user keeps their session (no CAPTCHA re-solve needed)
+  useEffect(() => {
+    return () => {
+      void window.matchview?.streaming.hideAll();
+    };
+  }, []);
+
+  // --- Smart stream mounting: diff layout changes ---
+
+  // mountNew must be declared before mountStreams (which calls it inside a useCallback)
+  const mountNew = useCallback(async (
+    matchId: string,
+    url: string,
+    rect: { x: number; y: number; width: number; height: number }
+  ) => {
+    if (!window.matchview) return;
+    const probe = await window.matchview.streaming.probeEmbedCompatibility(url);
+    if (probe.embeddable) {
+      await window.matchview.streaming.mountEmbedded(matchId, url, rect);
+      mountedRef.current.set(matchId, url);
+    } else {
+      // Site blocks embedding — open in external browser sized to the slot
+      await window.matchview.streaming.launchExternal(matchId, "system", rect);
+      // External windows aren't tracked (we can't hide/show OS windows)
+    }
+  }, []);
+
   const mountStreams = useCallback(async (layout: typeof computedLayout) => {
     if (!layout || !window.matchview) return;
-
     const containerEl = containerRef.current;
     if (!containerEl) return;
 
-    // Get the container's position on screen for absolute rect calculation
     const domRect = containerEl.getBoundingClientRect();
-    const scaleX = window.devicePixelRatio ?? 1;
-    const scaleY = window.devicePixelRatio ?? 1;
-
+    const dpr = window.devicePixelRatio ?? 1;
     const stillNeeded = new Set<string>();
 
     for (const slot of layout.slots) {
       const match = matches.find((m) => m.id === slot.matchId);
       if (!match) continue;
-
       stillNeeded.add(slot.matchId);
 
-      // Physical pixel rect covering this slot on screen
       const rect = {
-        x: Math.round((domRect.left + slot.rect.x) * scaleX),
-        y: Math.round((domRect.top + slot.rect.y) * scaleY),
-        width: Math.round(slot.rect.width * scaleX),
-        height: Math.round(slot.rect.height * scaleY),
+        x: Math.round((domRect.left + slot.rect.x) * dpr),
+        y: Math.round((domRect.top + slot.rect.y) * dpr),
+        width: Math.round(slot.rect.width * dpr),
+        height: Math.round(slot.rect.height * dpr),
       };
 
-      if (mountedRef.current.has(slot.matchId)) {
-        // Already mounted — just resize
+      const alreadyMountedUrl = mountedRef.current.get(slot.matchId);
+
+      if (alreadyMountedUrl === match.url) {
+        // Same URL already loaded — just resize, no reload, no CAPTCHA loss
         await window.matchview.streaming.resize(slot.matchId, rect);
+      } else if (alreadyMountedUrl !== undefined) {
+        // URL changed for this slot — need to remount
+        await window.matchview.streaming.unmount(slot.matchId);
+        mountedRef.current.delete(slot.matchId);
+        await mountNew(slot.matchId, match.url, rect);
       } else {
-        // New slot — probe then mount (or launch external)
-        const probe = await window.matchview.streaming.probeEmbedCompatibility(match.url);
-        if (probe.embeddable) {
-          await window.matchview.streaming.mountEmbedded(slot.matchId, match.url, rect);
-          mountedRef.current.add(slot.matchId);
-        } else {
-          // Site blocks embedding — open in external browser window
-          await window.matchview.streaming.launchExternal(slot.matchId, "system", rect);
-          // Don't add to mountedRef; external windows aren't managed by us
-        }
+        // New slot
+        await mountNew(slot.matchId, match.url, rect);
       }
     }
 
-    // Unmount any slots that are no longer in the layout
-    for (const id of [...mountedRef.current]) {
+    // Remove views for slots no longer in the layout
+    for (const id of [...mountedRef.current.keys()]) {
       if (!stillNeeded.has(id)) {
         await window.matchview.streaming.unmount(id);
         mountedRef.current.delete(id);
       }
     }
-  }, [matches]);
+  }, [matches, mountNew]);
 
   useEffect(() => {
     void mountStreams(computedLayout);
   }, [computedLayout, mountStreams]);
-
-  // --- Unmount all BrowserViews when leaving the live screen ---
-  useEffect(() => {
-    return () => {
-      void window.matchview?.streaming.unmount("__all__"); // signal ignored; use unmountAll below
-      void window.matchview?.streaming.unmountAll?.();
-      mountedRef.current.clear();
-    };
-  }, []);
 
   // --- Overlay events ---
   useEffect(() => {
@@ -115,10 +134,7 @@ export function LiveViewing(): React.ReactElement {
     const unsubRestore = window.matchview?.events.onOverlayRestore(() => {
       useAppStore.getState().setActiveOverlay(null);
     });
-    return () => {
-      unsubShow?.();
-      unsubRestore?.();
-    };
+    return () => { unsubShow?.(); unsubRestore?.(); };
   }, []);
 
   const displayLayout =
@@ -160,14 +176,18 @@ export function LiveViewing(): React.ReactElement {
           ))}
         </div>
         <div style={{ flex: 1 }} />
-        <button onClick={() => setScreen("events")} style={ghostBtn}>
-          Events
-        </button>
-        <button onClick={() => setScreen("session-config")} style={ghostBtn}>
-          Sources
-        </button>
-        <button onClick={() => setScreen("dashboard")} style={ghostBtn}>
-          Exit session
+        <button onClick={() => setScreen("events")} style={ghostBtn}>Events</button>
+        <button onClick={() => setScreen("session-config")} style={ghostBtn}>Sources</button>
+        <button
+          onClick={() => {
+            void window.matchview?.streaming.unmountAll();
+            mountedRef.current.clear();
+            void window.matchview?.discovery.stopBroadcast();
+            setScreen("dashboard");
+          }}
+          style={ghostBtn}
+        >
+          End session
         </button>
       </div>
 
@@ -175,17 +195,10 @@ export function LiveViewing(): React.ReactElement {
         onClick={toggleControlPanel}
         title={controlPanelVisible ? "Hide control panel" : "Show control panel"}
         style={{
-          position: "absolute",
-          top: 6,
-          right: 6,
-          zIndex: 20,
-          background: "rgba(0,0,0,0.55)",
-          border: "1px solid var(--mv-bg-hairline)",
-          color: "var(--mv-text-secondary)",
-          borderRadius: "var(--mv-radius-sm)",
-          width: 24,
-          height: 24,
-          fontSize: 12,
+          position: "absolute", top: 6, right: 6, zIndex: 20,
+          background: "rgba(0,0,0,0.55)", border: "1px solid var(--mv-bg-hairline)",
+          color: "var(--mv-text-secondary)", borderRadius: "var(--mv-radius-sm)",
+          width: 24, height: 24, fontSize: 12,
         }}
       >
         {controlPanelVisible ? "▴" : "▾"}
@@ -193,9 +206,7 @@ export function LiveViewing(): React.ReactElement {
 
       <div ref={containerRef} style={{ position: "relative", flex: 1, overflow: "hidden" }}>
         {!displayLayout && (
-          <div style={emptyStateStyle}>
-            <p>No matches configured for this session.</p>
-          </div>
+          <div style={emptyStateStyle}><p>No matches configured for this session.</p></div>
         )}
         {displayLayout?.slots.map((slot) => {
           const match = matches.find((m) => m.id === slot.matchId);
@@ -205,42 +216,27 @@ export function LiveViewing(): React.ReactElement {
               key={slot.matchId}
               style={{
                 position: "absolute",
-                left: slot.rect.x,
-                top: slot.rect.y,
-                width: slot.rect.width,
-                height: slot.rect.height,
+                left: slot.rect.x, top: slot.rect.y,
+                width: slot.rect.width, height: slot.rect.height,
                 background: "#0a0a0c",
                 border: isOverlaying ? "2px solid var(--mv-accent)" : "1px solid #1c1e22",
-                transition:
-                  "left var(--mv-duration-overlay) var(--mv-ease), top var(--mv-duration-overlay) var(--mv-ease), width var(--mv-duration-overlay) var(--mv-ease), height var(--mv-duration-overlay) var(--mv-ease)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "var(--mv-text-tertiary)",
-                fontSize: 12,
+                transition: "left var(--mv-duration-overlay) var(--mv-ease), top var(--mv-duration-overlay) var(--mv-ease), width var(--mv-duration-overlay) var(--mv-ease), height var(--mv-duration-overlay) var(--mv-ease)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                color: "var(--mv-text-tertiary)", fontSize: 12,
               }}
             >
-              {/* The actual video is a native BrowserView positioned by the
-                  main process to exactly cover this div's screen rect (see
-                  StreamingManager + IPC wiring); this placeholder is what
-                  renders if embedding isn't available for this source. */}
-              <span>{match?.label ?? slot.matchId}</span>
+              {/* BrowserView is positioned by main process exactly over this div.
+                  This placeholder shows the match label until/unless the view loads. */}
+              <span style={{ opacity: 0.4 }}>{match?.label ?? slot.matchId}</span>
               {isOverlaying && (
-                <div
-                  style={{
-                    position: "absolute",
-                    bottom: 8,
-                    left: 8,
-                    background: "var(--mv-live)",
-                    color: "#fff",
-                    fontSize: 11,
-                    fontFamily: "var(--mv-font-display)",
-                    letterSpacing: "0.04em",
-                    padding: "3px 8px",
-                    borderRadius: "var(--mv-radius-sm)",
-                  }}
-                >
-                  {activeOverlay?.event.type.toUpperCase().replace("_", " ")} · {activeOverlay?.event.minute}'
+                <div style={{
+                  position: "absolute", bottom: 8, left: 8,
+                  background: "var(--mv-live)", color: "#fff",
+                  fontSize: 11, fontFamily: "var(--mv-font-display)",
+                  letterSpacing: "0.04em", padding: "3px 8px",
+                  borderRadius: "var(--mv-radius-sm)",
+                }}>
+                  {activeOverlay?.event.type.toUpperCase().replace("_", " ")} · {activeOverlay?.event.minute}′
                   {activeOverlay?.event.playerName ? ` · ${activeOverlay.event.playerName}` : ""}
                 </div>
               )}
@@ -252,16 +248,10 @@ export function LiveViewing(): React.ReactElement {
           <button
             onClick={() => window.matchview?.events.dismissOverlay(activeOverlay.id)}
             style={{
-              position: "absolute",
-              top: 8,
-              right: 8,
-              zIndex: 30,
-              background: "rgba(0,0,0,0.6)",
-              color: "#fff",
+              position: "absolute", top: 8, right: 8, zIndex: 30,
+              background: "rgba(0,0,0,0.6)", color: "#fff",
               border: "1px solid rgba(255,255,255,0.2)",
-              borderRadius: "var(--mv-radius-sm)",
-              padding: "4px 10px",
-              fontSize: 11,
+              borderRadius: "var(--mv-radius-sm)", padding: "4px 10px", fontSize: 11,
             }}
           >
             Dismiss
@@ -273,18 +263,12 @@ export function LiveViewing(): React.ReactElement {
 }
 
 const ghostBtn: React.CSSProperties = {
-  background: "transparent",
-  border: "1px solid var(--mv-bg-hairline)",
-  color: "var(--mv-text-secondary)",
-  borderRadius: "var(--mv-radius-sm)",
-  padding: "4px 10px",
+  background: "transparent", border: "1px solid var(--mv-bg-hairline)",
+  color: "var(--mv-text-secondary)", borderRadius: "var(--mv-radius-sm)", padding: "4px 10px",
 };
 
 const emptyStateStyle: React.CSSProperties = {
-  position: "absolute",
-  inset: 0,
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
+  position: "absolute", inset: 0,
+  display: "flex", alignItems: "center", justifyContent: "center",
   color: "var(--mv-text-tertiary)",
 };

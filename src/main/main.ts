@@ -1,4 +1,4 @@
-import { app, BrowserWindow, BrowserView, screen, ipcMain, safeStorage } from "electron";
+import { app, BrowserWindow, BrowserView, screen, ipcMain, safeStorage, session } from "electron";
 import * as path from "node:path";
 import { MonitorService, type ScreenLike } from "./monitors/MonitorService";
 import { AppDatabase } from "./persistence/Database";
@@ -6,11 +6,13 @@ import { SecureConfig } from "./config/SecureConfig";
 import { ApiFootballProvider } from "./events/providers/ApiFootballProvider";
 import { EventMonitor } from "./events/EventMonitor";
 import { OverlayScheduler } from "./events/OverlayScheduler";
-import { StreamingManager } from "./streaming/StreamingManager";
+import { StreamingManager, isAdUrl } from "./streaming/StreamingManager";
+import { LanDiscovery } from "./discovery/LanDiscovery";
 import { DEFAULT_EVENT_SETTINGS, type EventSettings, type FootballEvent } from "../shared/types";
 
 let mainWindow: BrowserWindow | null = null;
 let streamingManager: StreamingManager | null = null;
+let lanDiscovery: LanDiscovery | null = null;
 
 const screenAdapter: ScreenLike = {
   getAllDisplays: () =>
@@ -70,6 +72,13 @@ const overlayScheduler = new OverlayScheduler(
 
 let schedulerTickHandle: NodeJS.Timeout | null = null;
 
+/** Apply session-level ad blocking to any BrowserView sessions */
+function applyAdBlocker(ses: Electron.Session): void {
+  ses.webRequest.onBeforeRequest({ urls: ["*://*/*"] }, (details, callback) => {
+    callback({ cancel: isAdUrl(details.url) });
+  });
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -86,16 +95,27 @@ function createWindow(): void {
 
   void mainWindow.loadFile(path.join(__dirname, "../renderer/index.html"));
 
-  // Wire StreamingManager now that we have a window
+  // Create a dedicated session for BrowserViews so the ad blocker only affects
+  // stream views, not the main renderer UI
+  const streamSession = session.fromPartition("persist:streams");
+  const prefs = db.getPreferences();
+  if (prefs.adBlockerEnabled !== false) applyAdBlocker(streamSession);
+
   streamingManager = new StreamingManager(mainWindow, {
-    create: () => new BrowserView({
-      webPreferences: {
-        contextIsolation: true,
-        nodeIntegration: false,
-        // Allow autoplay so video streams start without user gesture
-        autoplayPolicy: "no-user-gesture-required",
-      },
-    }),
+    create: () =>
+      new BrowserView({
+        webPreferences: {
+          session: streamSession,
+          contextIsolation: true,
+          nodeIntegration: false,
+          autoplayPolicy: "no-user-gesture-required",
+        },
+      }),
+  });
+
+  // LAN discovery: push peer updates to renderer
+  lanDiscovery = new LanDiscovery((peers) => {
+    mainWindow?.webContents.send("discovery:peers", peers);
   });
 
   monitorService.start();
@@ -111,9 +131,11 @@ function createWindow(): void {
 }
 
 function registerIpcHandlers(): void {
+  // ── Monitors ──────────────────────────────────────────────────────────────
   ipcMain.handle("monitors:list", () => monitorService.listMonitors());
   ipcMain.handle("monitors:select", (_e, id: number) => monitorService.selectMonitor(id));
 
+  // ── Persistence ───────────────────────────────────────────────────────────
   ipcMain.handle("persistence:getPreferences", () => db.getPreferences());
   ipcMain.handle("persistence:savePreferences", (_e, prefs) => db.savePreferences(prefs));
   ipcMain.handle("persistence:listMatches", () => db.listMatchSources());
@@ -122,6 +144,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle("persistence:listSavedLayouts", () => db.listSavedLayouts());
   ipcMain.handle("persistence:saveLayout", (_e, layout) => db.saveLayout(layout));
 
+  // ── Events / overlay ──────────────────────────────────────────────────────
   ipcMain.handle("events:getProviderStatus", () => provider.getStatus());
   ipcMain.handle("events:setApiKey", (_e, key: string) => {
     secureConfig.setApiKey(key);
@@ -148,33 +171,64 @@ function registerIpcHandlers(): void {
     }
   });
 
-  // Streaming IPC — now fully wired using the StreamingManager created in createWindow()
+  // ── Streaming ─────────────────────────────────────────────────────────────
   ipcMain.handle("streaming:probe", (_e, url: string) => {
     if (!streamingManager) return { embeddable: false, reason: "App not ready", checkedAt: Date.now() };
     return streamingManager.probeEmbedCompatibility(url);
   });
-
   ipcMain.handle("streaming:mount", (_e, matchId: string, url: string, rect: { x: number; y: number; width: number; height: number }) => {
-    if (!streamingManager) return;
-    streamingManager.mountEmbedded(matchId, url, rect);
+    streamingManager?.mountEmbedded(matchId, url, rect);
   });
-
   ipcMain.handle("streaming:resize", (_e, matchId: string, rect: { x: number; y: number; width: number; height: number }) => {
     streamingManager?.resize(matchId, rect);
   });
-
   ipcMain.handle("streaming:unmount", (_e, matchId: string) => {
     streamingManager?.unmount(matchId);
   });
-
   ipcMain.handle("streaming:unmountAll", () => {
     streamingManager?.unmountAll();
   });
-
+  ipcMain.handle("streaming:hideAll", () => {
+    streamingManager?.hideAll();
+  });
+  ipcMain.handle("streaming:showAll", () => {
+    streamingManager?.showAll();
+  });
+  ipcMain.handle("streaming:listMounted", () => {
+    return streamingManager?.listMounted() ?? [];
+  });
   ipcMain.handle("streaming:launchExternal", (_e, matchId: string, browser: string, rect: { x: number; y: number; width: number; height: number }) => {
     if (!streamingManager) return;
     const match = db.listMatchSources().find((m) => m.id === matchId);
     if (match) streamingManager.launchExternal(match, browser as "chrome" | "edge" | "brave" | "system", rect);
+  });
+
+  // ── Ad blocker ────────────────────────────────────────────────────────────
+  ipcMain.handle("adblocker:setEnabled", (_e, enabled: boolean) => {
+    streamingManager?.setAdBlockEnabled(enabled);
+    const prefs = db.getPreferences();
+    db.savePreferences({ ...prefs, adBlockerEnabled: enabled });
+  });
+  ipcMain.handle("adblocker:isEnabled", () => {
+    return db.getPreferences().adBlockerEnabled !== false;
+  });
+
+  // ── Discovery ─────────────────────────────────────────────────────────────
+  ipcMain.handle("discovery:startBroadcast", (_e, matches: Array<{ label: string; url: string }>) => {
+    lanDiscovery?.startBroadcasting(matches);
+  });
+  ipcMain.handle("discovery:stopBroadcast", () => {
+    lanDiscovery?.stopBroadcasting();
+  });
+  ipcMain.handle("discovery:generateCode", (_e, matches: Array<{ label: string; url: string }>) => {
+    return LanDiscovery.generateShareCode(matches);
+  });
+  ipcMain.handle("discovery:decodeCode", (_e, code: string) => {
+    try {
+      return { matches: LanDiscovery.decodeShareCode(code), error: null };
+    } catch (e) {
+      return { matches: null, error: (e as Error).message };
+    }
   });
 }
 
@@ -191,10 +245,10 @@ app.on("window-all-closed", () => {
   if (schedulerTickHandle) clearInterval(schedulerTickHandle);
   eventMonitor.stop();
   monitorService.stop();
+  lanDiscovery?.close();
   db.close();
   if (process.platform !== "darwin") app.quit();
 });
 
-// Suppress unused-import lint noise for BrowserView, kept as the documented
-// integration point (now actively used via streamingManager factory above).
+// Keep BrowserView import live (used by streamingManager factory above)
 void BrowserView;

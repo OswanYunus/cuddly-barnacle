@@ -45,6 +45,22 @@ export function Dashboard(): React.ReactElement {
           >
             Start viewing session
           </button>
+          <button
+            onClick={() => setScreen("discovery")}
+            style={{
+              background: "transparent",
+              color: "var(--mv-text-secondary)",
+              border: "1px solid var(--mv-bg-hairline)",
+              borderRadius: "var(--mv-radius-md)",
+              padding: "var(--mv-space-3) var(--mv-space-5)",
+              fontFamily: "var(--mv-font-display)",
+              fontSize: 14,
+              letterSpacing: "0.04em",
+              width: "fit-content",
+            }}
+          >
+            📡 Discover match links
+          </button>
 
           <div
             style={{

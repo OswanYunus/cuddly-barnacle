@@ -10,7 +10,7 @@ import type {
 import { DEFAULT_EVENT_SETTINGS } from "@shared/types";
 import { computeLayout, recommendedLayoutForCount } from "../layout/LayoutEngine";
 
-export type Screen = "dashboard" | "session-config" | "live" | "events" | "settings";
+export type Screen = "dashboard" | "session-config" | "live" | "events" | "settings" | "discovery";
 
 interface AppState {
   screen: Screen;
