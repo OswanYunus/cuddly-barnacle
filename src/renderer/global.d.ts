@@ -60,6 +60,10 @@ export interface MatchViewBridge {
     listSharedLinks(): Promise<SharedLink[]>;
     saveSharedLink(link: SharedLink): Promise<void>;
     deleteSharedLink(id: string): Promise<void>;
+    listGlobalMatches(): Promise<SharedLink[]>;
+    publishGlobalMatch(label: string, url: string, author?: string): Promise<void>;
+    publishGlobalMatches(matches: SharedMatchEntry[], author?: string): Promise<void>;
+    onGlobalMatches(cb: (matches: SharedLink[]) => void): () => void;
     startBroadcast(matches: SharedMatchEntry[]): Promise<void>;
     stopBroadcast(): Promise<void>;
     generateCode(matches: SharedMatchEntry[]): Promise<string>;

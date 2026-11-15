@@ -43,11 +43,13 @@ export function SessionConfig(): React.ReactElement {
       source: "You",
       createdAt: Date.now(),
     });
-    await window.matchview.discovery.startBroadcast(
+    // Broadcast globally to relays and locally on LAN
+    void window.matchview.discovery.publishGlobalMatch(match.label, match.url);
+    void window.matchview.discovery.startBroadcast(
       matches.map((m) => ({ label: m.label, url: m.url })),
     );
-    setSharedAlert(`"${match.label}" posted to Discover Matches!`);
-    setTimeout(() => setSharedAlert(null), 3000);
+    setSharedAlert(`"${match.label}" published globally to Discover Matches!`);
+    setTimeout(() => setSharedAlert(null), 3500);
   };
 
   const handleShareAllMatches = async () => {
@@ -62,11 +64,15 @@ export function SessionConfig(): React.ReactElement {
         createdAt: now,
       });
     }
-    await window.matchview.discovery.startBroadcast(
+    // Publish globally and locally
+    void window.matchview.discovery.publishGlobalMatches(
       matches.map((m) => ({ label: m.label, url: m.url })),
     );
-    setSharedAlert(`All ${matches.length} matches posted to Discover Matches!`);
-    setTimeout(() => setSharedAlert(null), 3000);
+    void window.matchview.discovery.startBroadcast(
+      matches.map((m) => ({ label: m.label, url: m.url })),
+    );
+    setSharedAlert(`All ${matches.length} matches published globally to Discover!`);
+    setTimeout(() => setSharedAlert(null), 3500);
   };
 
   const selectedMonitor = monitors.find((m) => m.id === selectedMonitorId) ?? monitors[0];

@@ -8,11 +8,13 @@ import { EventMonitor } from "./events/EventMonitor";
 import { OverlayScheduler } from "./events/OverlayScheduler";
 import { StreamingManager, isAdUrl } from "./streaming/StreamingManager";
 import { LanDiscovery } from "./discovery/LanDiscovery";
+import { GlobalDiscovery } from "./discovery/GlobalDiscovery";
 import { DEFAULT_EVENT_SETTINGS, type EventSettings, type FootballEvent } from "../shared/types";
 
 let mainWindow: BrowserWindow | null = null;
 let streamingManager: StreamingManager | null = null;
 let lanDiscovery: LanDiscovery | null = null;
+let globalDiscovery: GlobalDiscovery | null = null;
 
 const screenAdapter: ScreenLike = {
   getAllDisplays: () =>
@@ -118,6 +120,11 @@ function createWindow(): void {
     mainWindow?.webContents.send("discovery:peers", peers);
   });
 
+  // Global discovery: push real-time matchday links from global relays
+  globalDiscovery = new GlobalDiscovery((matches) => {
+    mainWindow?.webContents.send("discovery:globalMatches", matches);
+  });
+
   monitorService.start();
   schedulerTickHandle = setInterval(() => overlayScheduler.tick(), 250);
 
@@ -217,6 +224,13 @@ function registerIpcHandlers(): void {
   ipcMain.handle("discovery:listSharedLinks", () => db.listSharedLinks());
   ipcMain.handle("discovery:saveSharedLink", (_e, link) => db.saveSharedLink(link));
   ipcMain.handle("discovery:deleteSharedLink", (_e, id: string) => db.deleteSharedLink(id));
+  ipcMain.handle("discovery:listGlobalMatches", () => globalDiscovery?.getMatches() ?? []);
+  ipcMain.handle("discovery:publishGlobalMatch", async (_e, label: string, url: string, author?: string) => {
+    await globalDiscovery?.publishMatch(label, url, author);
+  });
+  ipcMain.handle("discovery:publishGlobalMatches", async (_e, matches: Array<{ label: string; url: string }>, author?: string) => {
+    await globalDiscovery?.publishMatches(matches, author);
+  });
   ipcMain.handle("discovery:startBroadcast", (_e, matches: Array<{ label: string; url: string }>) => {
     lanDiscovery?.startBroadcasting(matches);
   });
@@ -249,6 +263,7 @@ app.on("window-all-closed", () => {
   eventMonitor.stop();
   monitorService.stop();
   lanDiscovery?.close();
+  globalDiscovery?.close();
   db.close();
   if (process.platform !== "darwin") app.quit();
 });

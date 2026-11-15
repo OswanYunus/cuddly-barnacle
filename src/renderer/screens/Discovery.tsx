@@ -8,6 +8,7 @@ export function Discovery(): React.ReactElement {
   const addMatch = useAppStore((s) => s.addMatch);
 
   const [savedLinks, setSavedLinks] = useState<SharedLink[]>([]);
+  const [globalLinks, setGlobalLinks] = useState<SharedLink[]>([]);
   const [peers, setPeers] = useState<DiscoveredSession[]>([]);
   const [shareCode, setShareCode] = useState<string | null>(null);
   const [importCode, setImportCode] = useState("");
@@ -19,6 +20,7 @@ export function Discovery(): React.ReactElement {
   // New post form state
   const [postLabel, setPostLabel] = useState("");
   const [postUrl, setPostUrl] = useState("");
+  const [postSuccess, setPostSuccess] = useState(false);
 
   const refreshSavedLinks = useCallback(async () => {
     if (!window.matchview) return;
@@ -32,16 +34,29 @@ export function Discovery(): React.ReactElement {
 
   useEffect(() => {
     let active = true;
+
+    // Load local links
     window.matchview?.discovery.listSharedLinks().then((list) => {
       if (active) setSavedLinks(list);
     }).catch(() => {});
 
-    const unsub = window.matchview?.discovery.onPeers((p) => {
+    // Load real-time global matches from relays
+    window.matchview?.discovery.listGlobalMatches().then((list) => {
+      if (active) setGlobalLinks(list);
+    }).catch(() => {});
+
+    const unsubGlobal = window.matchview?.discovery.onGlobalMatches((list) => {
+      if (active) setGlobalLinks(list);
+    });
+
+    const unsubPeers = window.matchview?.discovery.onPeers((p) => {
       if (active) setPeers(p);
     });
+
     return () => {
       active = false;
-      unsub?.();
+      unsubGlobal?.();
+      unsubPeers?.();
     };
   }, []);
 
@@ -50,29 +65,39 @@ export function Discovery(): React.ReactElement {
     if (e) e.preventDefault();
     if (!postLabel.trim() || !postUrl.trim() || !window.matchview) return;
 
+    const label = postLabel.trim();
+    const url = postUrl.trim();
+
     const newLink: SharedLink = {
       id: `share-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      label: postLabel.trim(),
-      url: postUrl.trim(),
-      source: "You",
+      label,
+      url,
+      source: "You (Global)",
       createdAt: Date.now(),
     };
 
+    // 1. Save locally
     await window.matchview.discovery.saveSharedLink(newLink);
     await refreshSavedLinks();
 
-    // Also broadcast to LAN
+    // 2. Broadcast globally to all Nostr relays so viewers anywhere receive it
+    void window.matchview.discovery.publishGlobalMatch(label, url);
+
+    // 3. Broadcast to LAN
     const allShares = [...savedLinks, newLink].map((s) => ({ label: s.label, url: s.url }));
-    await window.matchview.discovery.startBroadcast(allShares);
+    void window.matchview.discovery.startBroadcast(allShares);
 
     setPostLabel("");
     setPostUrl("");
+    setPostSuccess(true);
+    setTimeout(() => setPostSuccess(false), 3000);
   };
 
   const handleDeleteSharedLink = async (id: string) => {
     if (!window.matchview) return;
     await window.matchview.discovery.deleteSharedLink(id);
     await refreshSavedLinks();
+    setGlobalLinks((prev) => prev.filter((g) => g.id !== id));
   };
 
   const handleCopy = async (url: string) => {
@@ -101,8 +126,9 @@ export function Discovery(): React.ReactElement {
 
   const handleGenerateShareCode = async () => {
     if (!window.matchview) return;
-    const items = savedLinks.length > 0
-      ? savedLinks.map((s) => ({ label: s.label, url: s.url }))
+    const combined = [...globalLinks, ...savedLinks];
+    const items = combined.length > 0
+      ? combined.map((s) => ({ label: s.label, url: s.url }))
       : matches.map((m) => ({ label: m.label, url: m.url }));
     if (items.length === 0) return;
     const code = await window.matchview.discovery.generateCode(items);
@@ -132,19 +158,31 @@ export function Discovery(): React.ReactElement {
         source: sourceName,
         createdAt: now,
       });
+      // also propagate globally
+      void window.matchview.discovery.publishGlobalMatch(m.label, m.url);
     }
     await refreshSavedLinks();
     setImportedMatches(null);
     setImportCode("");
   };
 
-  // Compile all peer matches for quick display
+  // Compile peer matches from LAN
   const peerMatches: Array<{ label: string; url: string; host: string }> = [];
   for (const p of peers) {
     for (const m of p.matches) {
       peerMatches.push({ label: m.label, url: m.url, host: p.hostName });
     }
   }
+
+  // De-duplicate global and saved links by URL
+  const displayedMap = new Map<string, SharedLink>();
+  for (const item of globalLinks) {
+    displayedMap.set(item.url, item);
+  }
+  for (const item of savedLinks) {
+    displayedMap.set(item.url, item);
+  }
+  const allDiscovered = [...displayedMap.values()].sort((a, b) => b.createdAt - a.createdAt);
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "var(--mv-bg-base)" }}>
@@ -162,7 +200,11 @@ export function Discovery(): React.ReactElement {
         <button onClick={() => setScreen("session-config")} style={ghostBtn}>
           ← Back to Sources
         </button>
-        <h2 style={{ margin: 0, fontSize: 18 }}>Discover Matches &amp; Shared Links</h2>
+        <h2 style={{ margin: 0, fontSize: 18 }}>Discover Matches &amp; Global Links</h2>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--mv-live)", fontWeight: 600 }}>
+          <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: "var(--mv-live)" }} />
+          <span>Global Live Sync Active (Auto-clears after matchday)</span>
+        </div>
         <div style={{ flex: 1 }} />
         <button onClick={() => setScreen("dashboard")} style={ghostBtn}>
           Dashboard
@@ -189,7 +231,7 @@ export function Discovery(): React.ReactElement {
             <span>How to watch &amp; paste match links</span>
           </div>
           <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5, color: "var(--mv-text-primary)" }}>
-            <strong>MatchView does not host, stream, or retransmit any video content.</strong> The links posted below are shared by viewers from the original broadcasting websites. When you watch, your app connects directly to the original site’s server with built-in ad and popup blocking.
+            <strong>MatchView does not host, stream, or retransmit any video content.</strong> The links posted below are shared globally by viewers from original broadcasting websites. Your app connects directly to the broadcaster’s server with built-in ad and popup blocking.
           </p>
           <div style={{ background: "var(--mv-bg-panel)", border: "1px solid var(--mv-bg-hairline)", borderRadius: "var(--mv-radius-sm)", padding: "var(--mv-space-3)", fontSize: 12, lineHeight: 1.6, color: "var(--mv-text-secondary)" }}>
             <strong>Step-by-step:</strong><br />
@@ -197,6 +239,8 @@ export function Discovery(): React.ReactElement {
             2. Click <strong>&quot;📺 Watch in MatchView&quot;</strong> to automatically load the link into your Sources.<br />
             3. Alternatively, click <strong>&quot;📋 Copy Link&quot;</strong>, navigate to <strong>Sources</strong>, paste the URL into the <em>Stream URL</em> input, and click <em>Add Match</em>.<br />
             4. Click <strong>Start Session</strong> to stream all your matches simultaneously without popup ads!
+            <br />
+            <em style={{ color: "var(--mv-text-tertiary)" }}>Note: Links are synced globally in real time and automatically expire after 14 hours (end of matchday).</em>
           </div>
         </section>
 
@@ -209,13 +253,13 @@ export function Discovery(): React.ReactElement {
             padding: "var(--mv-space-5)",
           }}
         >
-          <h3 style={{ marginTop: 0, marginBottom: "var(--mv-space-3)", fontSize: 15 }}>
-            Post a Match Link to Discover Matches
+          <h3 style={{ marginTop: 0, marginBottom: "var(--mv-space-2)", fontSize: 15 }}>
+            Post a Match Link (Broadcasts Globally &amp; Clears After Matchday)
           </h3>
           <p style={{ margin: "0 0 var(--mv-space-4)", fontSize: 13, color: "var(--mv-text-secondary)" }}>
-            Post the match name and the URL you use so other viewers (or your other devices) can discover and paste it.
+            Post a match title and stream URL. It will instantly appear for your friends anywhere in the world and automatically self-destruct after today’s matches.
           </p>
-          <form onSubmit={handlePostLink} style={{ display: "flex", gap: "var(--mv-space-3)", flexWrap: "wrap" }}>
+          <form onSubmit={handlePostLink} style={{ display: "flex", gap: "var(--mv-space-3)", flexWrap: "wrap", alignItems: "center" }}>
             <input
               placeholder="Match Name (e.g. Manchester United vs Chelsea)"
               value={postLabel}
@@ -233,8 +277,13 @@ export function Discovery(): React.ReactElement {
               disabled={!postLabel.trim() || !postUrl.trim()}
               style={{ ...accentBtn, opacity: !postLabel.trim() || !postUrl.trim() ? 0.6 : 1 }}
             >
-              📡 Post to Discover Matches
+              🌐 Post Globally
             </button>
+            {postSuccess && (
+              <span style={{ color: "var(--mv-accent)", fontSize: 12, fontWeight: 600 }}>
+                ✓ Broadcasted globally to all viewers!
+              </span>
+            )}
           </form>
         </section>
 
@@ -249,21 +298,21 @@ export function Discovery(): React.ReactElement {
         >
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "var(--mv-space-4)" }}>
             <h3 style={{ margin: 0, fontSize: 15 }}>
-              Available Matches ({savedLinks.length + peerMatches.length})
+              Today’s Live Match Links ({allDiscovered.length + peerMatches.length})
             </h3>
             <button onClick={handleGenerateShareCode} style={ghostBtn}>
               🔗 Export All as Share Code
             </button>
           </div>
 
-          {savedLinks.length === 0 && peerMatches.length === 0 ? (
+          {allDiscovered.length === 0 && peerMatches.length === 0 ? (
             <div style={{ padding: "var(--mv-space-6)", textAlign: "center", color: "var(--mv-text-tertiary)", fontSize: 13 }}>
-              No matches posted yet. Post a match link above or import a share code!
+              No matches posted for today yet. Post a match link above to broadcast it globally!
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: "var(--mv-space-3)" }}>
-              {/* Local Saved / Posted Links */}
-              {savedLinks.map((link) => (
+              {/* Combined Global + Saved Links */}
+              {allDiscovered.map((link) => (
                 <div
                   key={link.id}
                   style={{
@@ -285,12 +334,13 @@ export function Discovery(): React.ReactElement {
                           fontSize: 10,
                           padding: "2px 6px",
                           borderRadius: "var(--mv-radius-sm)",
-                          background: link.source === "You" ? "var(--mv-accent)" : "var(--mv-bg-hairline)",
-                          color: link.source === "You" ? "var(--mv-accent-text-on)" : "var(--mv-text-secondary)",
-                          fontWeight: 600,
+                          background: link.source.includes("Global") ? "rgba(46, 204, 113, 0.18)" : "var(--mv-accent)",
+                          color: link.source.includes("Global") ? "var(--mv-live)" : "var(--mv-accent-text-on)",
+                          fontWeight: 700,
+                          border: link.source.includes("Global") ? "1px solid var(--mv-live)" : "none",
                         }}
                       >
-                        {link.source}
+                        {link.source.includes("Global") ? `🌐 ${link.source}` : link.source}
                       </span>
                     </div>
                     <div
@@ -327,7 +377,7 @@ export function Discovery(): React.ReactElement {
                     <button
                       onClick={() => void handleDeleteSharedLink(link.id)}
                       style={{ ...ghostBtn, color: "var(--mv-critical)", fontSize: 12 }}
-                      title="Remove from discovered matches"
+                      title="Remove from your view"
                     >
                       ✕
                     </button>

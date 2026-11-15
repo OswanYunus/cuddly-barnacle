@@ -84,6 +84,16 @@ contextBridge.exposeInMainWorld("matchview", {
     listSharedLinks: (): Promise<SharedLink[]> => ipcRenderer.invoke("discovery:listSharedLinks"),
     saveSharedLink: (link: SharedLink): Promise<void> => ipcRenderer.invoke("discovery:saveSharedLink", link),
     deleteSharedLink: (id: string): Promise<void> => ipcRenderer.invoke("discovery:deleteSharedLink", id),
+    listGlobalMatches: (): Promise<SharedLink[]> => ipcRenderer.invoke("discovery:listGlobalMatches"),
+    publishGlobalMatch: (label: string, url: string, author?: string): Promise<void> =>
+      ipcRenderer.invoke("discovery:publishGlobalMatch", label, url, author),
+    publishGlobalMatches: (matches: SharedMatchEntry[], author?: string): Promise<void> =>
+      ipcRenderer.invoke("discovery:publishGlobalMatches", matches, author),
+    onGlobalMatches: (cb: (matches: SharedLink[]) => void) => {
+      const listener = (_e: unknown, matches: SharedLink[]) => cb(matches);
+      ipcRenderer.on("discovery:globalMatches", listener);
+      return () => ipcRenderer.removeListener("discovery:globalMatches", listener);
+    },
     startBroadcast: (matches: SharedMatchEntry[]) => ipcRenderer.invoke("discovery:startBroadcast", matches),
     stopBroadcast: () => ipcRenderer.invoke("discovery:stopBroadcast"),
     generateCode: (matches: SharedMatchEntry[]): Promise<string> =>
