@@ -1,6 +1,15 @@
-import { finalizeEvent, generateSecretKey, getPublicKey, Relay, type Event } from "nostr-tools";
+import type { Event, Relay as RelayInstance } from "nostr-tools";
 import WebSocket from "ws";
 import type { SharedLink, SharedMatchEntry } from "../../shared/types";
+
+type NostrToolsModule = typeof import("nostr-tools");
+
+// TypeScript compiles the Electron main process to CommonJS. Keep this import
+// native so Node selects nostr-tools' ESM entry and avoids its incompatible
+// CommonJS entry, which requires ESM-only @noble/curves modules.
+const importEsm = new Function("specifier", "return import(specifier)") as (
+  specifier: string,
+) => Promise<NostrToolsModule>;
 
 // Polyfill global WebSocket for Node environment if missing
 if (!globalThis.WebSocket) {
@@ -19,9 +28,9 @@ const MATCHVIEW_TAG = "matchview-live";
 const MATCHDAY_TTL_SECONDS = 14 * 3600;
 
 export class GlobalDiscovery {
-  private secretKey: Uint8Array;
-  private publicKey: string;
-  private relays: Relay[] = [];
+  private readonly nostrTools = importEsm("nostr-tools");
+  private secretKey: Promise<Uint8Array> | null = null;
+  private relays: RelayInstance[] = [];
   private onMatchesUpdated: (matches: SharedLink[]) => void;
   private matchesMap = new Map<string, SharedLink>();
   private cleanupInterval: NodeJS.Timeout | null = null;
@@ -29,8 +38,6 @@ export class GlobalDiscovery {
 
   constructor(onMatchesUpdated: (matches: SharedLink[]) => void) {
     this.onMatchesUpdated = onMatchesUpdated;
-    this.secretKey = generateSecretKey();
-    this.publicKey = getPublicKey(this.secretKey);
 
     void this.connectAndSubscribe();
 
@@ -51,6 +58,7 @@ export class GlobalDiscovery {
 
   private async connectRelay(url: string): Promise<void> {
     try {
+      const { Relay } = await this.nostrTools;
       const relay = await Relay.connect(url);
       if (this.destroyed) {
         relay.close();
@@ -114,6 +122,10 @@ export class GlobalDiscovery {
    * Auto-expires in 14 hours.
    */
   async publishMatch(label: string, url: string, author = "Viewer"): Promise<void> {
+    const [{ finalizeEvent }, secretKey] = await Promise.all([
+      this.nostrTools,
+      this.getSecretKey(),
+    ]);
     const nowSeconds = Math.floor(Date.now() / 1000);
     const expiresAt = nowSeconds + MATCHDAY_TTL_SECONDS;
 
@@ -127,7 +139,7 @@ export class GlobalDiscovery {
         ],
         content: JSON.stringify({ label, url, author }),
       },
-      this.secretKey,
+      secretKey,
     );
 
     // Add locally immediately so the author sees it without network roundtrip delay
@@ -196,5 +208,10 @@ export class GlobalDiscovery {
       }
     }
     this.relays = [];
+  }
+
+  private getSecretKey(): Promise<Uint8Array> {
+    this.secretKey ??= this.nostrTools.then(({ generateSecretKey }) => generateSecretKey());
+    return this.secretKey;
   }
 }
